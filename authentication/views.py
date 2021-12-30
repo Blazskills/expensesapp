@@ -1,7 +1,9 @@
 from django.shortcuts import render
-from rest_framework import generics, status, views
+from rest_framework import generics, permissions, status, views
 from rest_framework.exceptions import AuthenticationFailed
-from .serializers import EmailVerificationSerializer, RegisterSerializer, LoginSerializer, ResetPasswordEmailRequestSerializer, SetNewPasswordSerializer
+
+from expenses.permissions import IsVerified
+from .serializers import EmailVerificationSerializer, LogoutSerializer, RegisterSerializer, LoginSerializer, ResetPasswordEmailRequestSerializer, SetNewPasswordSerializer
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from .utils import Util
@@ -95,33 +97,34 @@ class LoginAPIView(generics.GenericAPIView):
         email = request.data['email']
         password = request.data['password']
         user = auth.authenticate(email=email, password=password)
-        if user:  
+        if user:
             # user = User.objects.get(email=email)
             if not user.is_verified:
                 if user.is_active:
                     token = RefreshToken.for_user(user).access_token
                     current_site = get_current_site(request).domain
                     relativeLink = reverse('email-verify')
-                    absurl = 'http://'+current_site+relativeLink+"?token="+str(token)
+                    absurl = 'http://'+current_site + \
+                        relativeLink+"?token="+str(token)
                     message = 'Hi ' + user.username + \
                         ' Use link to verify your email, it expires in 5min \n' + absurl
                     email_from = settings.EMAIL_HOST_USER
                     email_to = user.email
                     data = {
-                            'subject': 'Verify your email', 'message': message, 'email_from': email_from, 'email_to': email_to
-                        }
+                        'subject': 'Verify your email', 'message': message, 'email_from': email_from, 'email_to': email_to
+                    }
                     try:
                         Util.send_email(data)
                         return Response({'succes': 'Account not verified. Kindly check your email to verifiy your account.'}, status=status.HTTP_200_OK)
                     except SMTPException as e:
                         return Response({'error': (f"There was an error sending an email.Something went wrong with your email.{e}")}, status=status.HTTP_406_NOT_ACCEPTABLE)
-                    except:                  
-                        return Response({'error': 'Mail Sending Failed!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)  
+                    except:
+                        return Response({'error': 'Mail Sending Failed!'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                 raise AuthenticationFailed('Account disable, Contact admin.')
-            data_verified= {
-            'email': user.email,
-            'username': user.username,
-            'tokens': user.tokens()
+            data_verified = {
+                'email': user.email,
+                'username': user.username,
+                'tokens': user.tokens()
             }
             return Response(data_verified, status=status.HTTP_200_OK)
         raise AuthenticationFailed('Invalid Credentials, Try again')
@@ -135,7 +138,6 @@ class LoginAPIView(generics.GenericAPIView):
         #     'tokens': user.tokens()
         # }
         # return Response(datas, status=status.HTTP_200_OK)
-
 
 
 # Stage 1 of reset password. This method takes the email alone and send it to the user. If user email is not valid or valid, it will still send the reset password to the email provided.
@@ -168,8 +170,11 @@ class RequestPasswordRestEmail(generics.GenericAPIView):
         return Response({'success': 'We have sent you a reset password link to your email address'},  status=status.HTTP_200_OK)
 
 # Stage 2 Reset method password, this method decode and check the reset password tokens is valid. Note: major part of the reset password method
+
+
 class PasswordTokenCheckApi(generics.GenericAPIView):
     serializer_class = ResetPasswordEmailRequestSerializer
+
     def get(self, request, uidb64, token):
         try:
             id = smart_str(urlsafe_base64_decode(uidb64))
@@ -181,7 +186,9 @@ class PasswordTokenCheckApi(generics.GenericAPIView):
             PasswordResetTokenGenerator().check_token(user)
             return Response({'error': 'Token not valid any more or has been tampered with, kindly request for a new password reset token'},  status=status.HTTP_401_UNAUTHORIZED)
 
-#Stage 3 Reset method password, this method allows users to input new password and update the old password with the new password provided by the user.
+# Stage 3 Reset method password, this method allows users to input new password and update the old password with the new password provided by the user.
+
+
 class SetNewPasswordApiView(generics.GenericAPIView):
     serializer_class = SetNewPasswordSerializer
 
@@ -212,3 +219,14 @@ class SetNewPasswordApiView(generics.GenericAPIView):
 #             return Response({'error': 'Activation Link Expired'}, status=status.HTTP_400_BAD_REQUEST)
 #         except jwt.exceptions.DecodeError as identifier:
 #             return Response({'error': 'Invalid token, Request new token'}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class LogoutApiView(generics.GenericAPIView):
+    serializer_class = LogoutSerializer
+    permission_classes = [permissions.IsAuthenticated, IsVerified]
+
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(status=status.HTTP_204_NO_CONTENT)

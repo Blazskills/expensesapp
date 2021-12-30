@@ -62,7 +62,8 @@ INSTALLED_APPS = [
     'expenses',
     'income',
     'corsheaders',
-    'userstats'
+    'userstats',
+    'rest_framework_simplejwt.token_blacklist'
     
 
 ]
