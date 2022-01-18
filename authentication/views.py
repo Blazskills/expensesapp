@@ -1,3 +1,4 @@
+import os
 from django.shortcuts import render
 from rest_framework import generics, permissions, status, views
 from rest_framework.exceptions import AuthenticationFailed
@@ -23,7 +24,13 @@ from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 import smtplib
 from django.contrib import auth
 from smtplib import SMTPException
+from django .shortcuts import redirect
+from django.http import HttpResponsePermanentRedirect
 # Create your views here.
+
+
+class CustomeRedirect(HttpResponsePermanentRedirect):
+    allowed_schemes = [os.environ.get('APP_SCHEME'), 'http', 'https']
 
 
 class RegisterView(generics.GenericAPIView):
@@ -147,27 +154,33 @@ class RequestPasswordRestEmail(generics.GenericAPIView):
     def post(self, request):
         serializer = self.serializer_class(data=request.data)
         email = request.data['email']
-        if User.objects.filter(email=email).exists():
-            user = User.objects.get(email=email)
-            uidb64 = urlsafe_base64_encode(smart_bytes(user.id))
-            token = PasswordResetTokenGenerator().make_token(user)
-            current_site = get_current_site(request=request).domain
-            relativeLink = reverse(
-                'password-reset-confirm', kwargs={'uidb64': uidb64, 'token': token})
-            absurl = 'http://'+current_site + relativeLink
-            message = 'Hello, \n Use link to reset your password here \n' + absurl
-            email_from = settings.EMAIL_HOST_USER
-            email_to = user.email
-            data = {
-                'subject': 'Reset your password', 'message': message, 'email_from': email_from, 'email_to': email_to
-            }
-            try:
-                Util.send_email(data)
-
-            except smtplib.SMTPRecipientsRefused:
-                return Response(f'server rejected recepients. Email can not be used,kindly provide another email',
-                                status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        return Response({'success': 'We have sent you a reset password link to your email address'},  status=status.HTTP_200_OK)
+        if '@example.' in email:
+            return Response({'error': (f"There was an error sending an email.Something went wrong with your email.")}, status=status.HTTP_406_NOT_ACCEPTABLE)
+        else:
+            if User.objects.filter(email=email).exists():
+                user = User.objects.get(email=email)
+                uidb64 = urlsafe_base64_encode(smart_bytes(user.id))
+                token = PasswordResetTokenGenerator().make_token(user)
+                current_site = get_current_site(request=request).domain
+                relativeLink = reverse(
+                    'password-reset-confirm', kwargs={'uidb64': uidb64, 'token': token})
+                redirect_url = request.data.get('redirect_url', '')
+                absurl = 'http://'+current_site + relativeLink
+                message = 'Hello, \n Use link to reset your password here \n' + \
+                    absurl+"?redirect_url="+redirect_url
+                email_from = settings.EMAIL_HOST_USER
+                email_to = user.email
+                data = {
+                    'subject': 'Reset your password', 'message': message, 'email_from': email_from, 'email_to': email_to
+                }
+                try:
+                    Util.send_email(data)
+                except Exception as e:
+                    print('error')
+                    return Response({'error': (f"There was an error sending an email.Something went wrong with your email.{e}")}, status=status.HTTP_406_NOT_ACCEPTABLE)
+                    # return Response(f'server rejected recepients. Email can not be used,kindly provide another email',
+                    #                 status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'success': 'We have sent you a reset password link to your email address'},  status=status.HTTP_200_OK)
 
 # Stage 2 Reset method password, this method decode and check the reset password tokens is valid. Note: major part of the reset password method
 
@@ -176,15 +189,23 @@ class PasswordTokenCheckApi(generics.GenericAPIView):
     serializer_class = ResetPasswordEmailRequestSerializer
 
     def get(self, request, uidb64, token):
+        redirect_url = request.GET.get('redirect_url')
         try:
             id = smart_str(urlsafe_base64_decode(uidb64))
             user = User.objects.get(id=id)
             if not PasswordResetTokenGenerator().check_token(user, token):
-                return Response({'error': 'Token not valid any more, kindly request for a new password reset token'},  status=status.HTTP_401_UNAUTHORIZED)
-            return Response({'success': True, 'message': 'Credentials valid', 'uidb64': uidb64, 'token': token}, status=status.HTTP_200_OK)
+                if len(redirect_url) > 3:
+                    return CustomeRedirect(redirect_url+'?token_valid=False')
+                else:
+                    return CustomeRedirect(os.environ.get('FRONTEND_URL', '')+'?token_valid=False')
+            if redirect_url and len(redirect_url) > 3:
+                return CustomeRedirect(redirect_url+'?token_valid=True&?message=Credentials valid&?uidb64='+uidb64+'&?token='+token)
+            else:
+                return CustomeRedirect(os.environ.get('FRONTEND_URL', '')+'?token_valid=False')
         except DjangoUnicodeDecodeError as identifier:
-            PasswordResetTokenGenerator().check_token(user)
-            return Response({'error': 'Token not valid any more or has been tampered with, kindly request for a new password reset token'},  status=status.HTTP_401_UNAUTHORIZED)
+            if not PasswordResetTokenGenerator().check_token(user):
+                return CustomeRedirect(redirect_url+'?token_valid=False')
+                #  return Response({'error': 'Token not valid any more or has been tampered with, kindly request for a new password reset token'},  status=status.HTTP_401_UNAUTHORIZED)
 
 # Stage 3 Reset method password, this method allows users to input new password and update the old password with the new password provided by the user.
 

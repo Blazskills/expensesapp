@@ -42,9 +42,11 @@ class IncomeSourcesSummaryStats(APIView):
     def get_amount_for_source(self, income_list, source):
         income = income_list.filter(source=source)
         amount = 0
+        sub_amount=30
         for i in income:
             amount += i.amount
-        return {'amount': str(amount)}
+            sub_amount+=i.amount
+        return {'amount': str(amount),'sub_amount': str(sub_amount), }
 
     def get_source(self, income):
         return income.source

@@ -19,3 +19,6 @@ class Util:
             subject=data['subject'], body=data['message'], from_email=data['email_from'], to=[data['email_to']])
         # email.send()
         EmailThread(email).start()
+        
+        
+        
